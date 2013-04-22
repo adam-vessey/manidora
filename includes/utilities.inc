@@ -18,13 +18,20 @@ function manidora_get_descendant_collections($collection_pid) {
   $dirs_to_search = array($collection_pid);
 
   while (count($dirs_to_process) > 0) {
-    $where = manidora_build_query($dirs_to_process);
+    $constraints = manidora_build_query($dirs_to_process);
     $dirs_to_process = array();
-    $ri_query = "select \$pid from <#ri>
-  $where
-    and  \$pid <fedora-model:state> <info:fedora/fedora-system:def/model#Active>
-    and (\$pid <info:fedora/fedora-system:def/model#hasModel> <info:fedora/islandora:collectionCModel>
-         or \$pid <info:fedora/fedora-system:def/model#hasModel> <info:fedora/islandora:newspaperCModel>)";
+    $ri_query = <<<EOQ
+select \$pid
+from <#ri>
+where (
+  ($constraints)
+  and  \$pid <fedora-model:state> <fedora-model:Active>
+  and (
+    \$pid <fedora-model;hasModel> <info:fedora/islandora:collectionCModel>
+    or \$pid <fedora-model:hasModel> <info:fedora/islandora:newspaperCModel>
+  )
+)
+EOQ;
     $objects = $fedora_object->repository->ri->itqlQuery($ri_query, 'unlimited');
     foreach ($objects as $object) {
       $dirs_to_search[] = $object['pid']['value'];
@@ -44,12 +51,13 @@ function manidora_get_descendant_collections($collection_pid) {
  *   Query string.
  */
 function manidora_build_query($collection_pids) {
-  $first_pid = array_shift($collection_pids);
-  $string = "\$pid  <info:fedora/fedora-system:def/relations-external#isMemberOfCollection> <info:fedora/$first_pid>";
-  while (count($collection_pids) > 0) {
-    $next_pid = array_shift($collection_pids);
-    $string .= " or \$pid  <info:fedora/fedora-system:def/relations-external#isMemberOfCollection> <info:fedora/$first_pid>";
-  }
-  $where_string = "where($string)";
-  return $where_string;
+  // Map into statements asserting collection  membership.
+  $statements = array_map(function ($pid) {
+    return "\$pid  <fedora-rels-ext:isMemberOfCollection> <info:fedora/$pid>";
+  }, $collection_pids);
+
+  // Implode all statements with "or".
+  $disjunction = implode(' or ', $statements);
+
+  return $disjunction;
 }
